@@ -36,13 +36,12 @@ def get_session():
 # function to get similes and other properties
 
 
-@timed()
-def get_mol_detail( smiles_id):
+
+def get_mol_detail(smiles_id):
     session = get_session()
     link = f'https://ochem.eu/molecule/profile.do?depiction={smiles_id}&render-mode=popup'
     # print(link)
     response = session.get(link)
-
 
     # print(response.text)
     tree = html.fromstring(response.text)
@@ -79,7 +78,7 @@ def process_one_page(property_id, pagenum, pagesize):
     prop = dict(prop[0])
 
     property_name = prop['title']
-    property_id = prop['value']
+    property_id = int(prop['value'])
 
     list_len = len(res.get('list').get('exp-property'))
 
@@ -113,7 +112,7 @@ def process_one_page(property_id, pagenum, pagesize):
             # 'molWeight':molWeight,
             'smiles_id': smiles_id,
             'property_name': property_name,
-            'property_name':property_name,
+            'property_id':property_name,
 
         }
 
@@ -122,13 +121,18 @@ def process_one_page(property_id, pagenum, pagesize):
 
     df = pd.DataFrame(mol_list)
 
-    columns = ['RecordID', 'RecordID', 'SMILES', 'doi',
-               'abb', 'printableValue', 'property_name', 'property_id', 'Name',
-               'Formula', 'InChI Key', 'Molecular Weight', 'smiles_id']
+    columns = ['RecordID', 'MoleculeID', 'SMILES', 'doi',
+               'abb', 'printableValue', 'property_name', 'property_id',
+               'Name', 'Formula', 'InChI Key', 'Molecular Weight', 'smiles_id']
 
-    fold = f'./ochem/{property_name}/'
+    fold = f'./ochem/{property_name}'
+    fold = fold.replace(' ', '_')
+    print(fold)
     os.makedirs(fold, exist_ok=True)
-    df[columns].to_hdf(f'{fold}/{property_id:03}_{pagenum:04}.h5', 'mol')
+
+    df_file = f'{fold}/{property_id:03}_{pagenum:04}.h5'
+    df[columns].to_hdf( df_file, 'mol')
+    print(f'file save to {df_file}')
 
     return df
 
@@ -187,11 +191,11 @@ def get_total_cnt(property_id):
 
 @timed()
 def process_one_item(property_id):
-        pagesize = 500
+        pagesize = 5
         total_num = get_total_cnt(property_id)
         total_page = int(np.ceil(int(total_num) / int(pagesize)))
 
-        for pagenum in range(1):
+        for pagenum in range(1, total_page+1):
             process_one_page(property_id, pagenum=pagenum, pagesize=pagesize)
 
 
