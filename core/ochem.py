@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 import logging
 logging.basicConfig(level=logging.INFO)
-from file_cache.utils.util_log import timed
+from file_cache.utils.util_log import timed, logger
 from file_cache.cache import file_cache
 import time
 
@@ -38,12 +38,20 @@ def get_session():
 # function to get similes and other properties
 
 
-
+@lru_cache()
+@timed()
 def get_mol_detail(smiles_id):
     session = get_session()
     link = f'https://ochem.eu/molecule/profile.do?depiction={smiles_id}&render-mode=popup'
     # print(link)
-    response = session.get(link)
+    try:
+        response = session.get(link)
+        if response.text.find('The molecule profile is unavailable') >=0 :
+            logger.info(f'This is an empty molecule:{smiles_id}')
+            return {'smiles_id':smiles_id, 'SMILES':'empty'}
+    except Exception as e:
+        logger.warning(e)
+        return get_mol_detail(smiles_id)
 
     # print(response.text)
     tree = html.fromstring(response.text)
@@ -66,14 +74,16 @@ def get_mol_detail(smiles_id):
         smiles_att[key] = value
 
     if len(smiles_att) == 0:
-        print(f'Warning: can not get smiles from link: {link}')
+        logger.info(f'Warning: can not get smiles from link: {link}')
+    else:
+        smiles_att['smiles_id'] = smiles_id
     return smiles_att
 
 
 @timed()
 @file_cache()
 def process_one_page(pagenum, property_id, pagesize):
-    sleep_time = np.random.randint(1, 30)
+    sleep_time = np.random.randint(1, 3)
     time.sleep(np.random.randint(sleep_time))
 
     args_local = locals()
@@ -81,11 +91,18 @@ def process_one_page(pagenum, property_id, pagesize):
     total_page = int(np.ceil(int(total_num) / int(pagesize)))
     res = get_request(property_id, pagenum, pagesize)
 
-    if res is None:
-        print(f'Get none from process_one_page:{args_local}')
+    if res.get('filters') is None or res.get('filters').get('filter') is None:
+        if res is None:
+            source = 1
+        elif res.get('filters') is None:
+            source = 2
+        elif res.get('filters').get('filter') is None:
+            source = 3
+        logger.info(f'Error: Get none from process_one_page({source}):{args_local}')
         return process_one_page(pagenum, property_id, pagesize)
 
     prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
+
     prop = dict(prop[0])
 
     property_name = prop['title']
@@ -93,7 +110,7 @@ def process_one_page(pagenum, property_id, pagesize):
 
     list_len = len(res.get('list').get('exp-property'))
 
-    print(f'There are {list_len}/{total_num} item in the res for page:{pagenum}/{total_page}, pagesize:{pagesize}')
+    logger.info(f'There are {list_len}/{total_num} item in the res for page:{pagenum}/{total_page}, pagesize:{pagesize}')
 
     session = get_session()
 
@@ -103,41 +120,48 @@ def process_one_page(pagenum, property_id, pagesize):
 
     for item in tqdm(item_list, f'{property_name}:{pagenum}/{total_page}'):
         try:
+            step=1
             RecordID = item.get('id')
+            step = 2
             printableValue = item.get('printableValue')
-
+            step = 3
             doi = item.get('article').get('doi')
-            abb = item.get('article').get('journal').get('abbreviation')
-
+            step = 4
+            #abb = item.get('article').get('journal').get('abbreviation')
             MoleculeID = item.get('molecule').get('mp2')
+            step = 5
             # molWeight  =     item.get('molecule').get('molWeight')
             smiles_id = item.get('molecule').get('id')
-
-            smiles_att = get_mol_detail(smiles_id)
+            step = 6
+            #smiles_att = get_mol_detail(smiles_id)
+            step = 7
         except Exception as e:
-            print(f'Parse error for :{RecordID}, {item}')
-            continue
+            logger.error(e)
+            logger.error(f'Parse error for :{RecordID}, step:{step}')
+            logger.error(item)
+            return
 
         mol = {
             'RecordID': RecordID,
             'printableValue': printableValue,
             'doi': doi,
-            'abb': abb,
+            #'abb': abb,
             'MoleculeID': MoleculeID,
             # 'molWeight':molWeight,
             'smiles_id': smiles_id,
             'property_name': property_name,
-            'property_id':property_name,
+            'property_id':property_id,
 
         }
 
-        mol.update(smiles_att)
+        #mol.update(smiles_att)
         mol_list.append(mol)
 
     df = pd.DataFrame(mol_list)
 
     columns = ['RecordID', 'MoleculeID', 'SMILES', 'doi',
-               'abb', 'printableValue', 'property_name', 'property_id',
+               #'abb',
+               'printableValue', 'property_name', 'property_id',
                'Name', 'Formula', 'InChI Key', 'Molecular Weight', 'smiles_id']
 
     fold = f'./output/ochem/{property_name}'
@@ -145,8 +169,10 @@ def process_one_page(pagenum, property_id, pagesize):
     df_file = f'{fold}/{property_id:03}_{pagesize}_{pagenum:04}.h5'
 
     os.makedirs(fold, exist_ok=True)
+
+    columns = [col for col in columns if col in df]
     df[columns].to_hdf( df_file, 'mol')
-    print(f'file save to {df_file}')
+    logger.info(f'file save to {df_file}')
 
     return df
 
@@ -187,12 +213,12 @@ def get_request(property_id, pagenum, pagesize = 500):
         'xemistry-similarity-cutoff': '85',
         'xemistry-sstype': 'substructure',
     }
-    r = session.post(url=url, data=data, headers=headers1)
+    r = session.post(url=url, data=data, headers=headers1, timeout=200)
 
     # get the request info:
     # List size, and list property_name, property_id
     import json
-    res = json.loads(r.text)
+    res = json.loads(r.text.encode('utf-8'))
 
     return res
 
@@ -224,6 +250,55 @@ def process_one_item(property_id, thread_num=3):
 
 
 
+@timed()
+def fill_smiles(property_id, thread_num=3):
+    res = get_request(property_id, 1, 1)
+
+    prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
+
+    prop = dict(prop[0])
+
+    property_name = prop['title']
+    property_name = property_name.replace(' ', '_')
+
+    property_id_query = int(prop['value'])
+
+    if property_id != property_id_query :
+        return f'{property_id} vs {property_id_query}'
+
+    from glob import glob
+    reg = f'./output/ochem/{property_name}/*.h5'
+    logger.info(f'find file with :{reg}')
+    file_list = glob(reg)
+    file_list = sorted(file_list)
+    for file in tqdm(file_list, property_name):
+        df = pd.read_hdf(file, 'mol').drop_duplicates('smiles_id')
+
+        with pd.HDFStore(file, 'r') as store:
+            meta_data = store.keys()
+            if '/smiles' in meta_data:
+                exist_smiles = pd.read_hdf(file, 'smiles')
+            else:
+                exist_smiles = pd.DataFrame(columns=['smiles_id'])
+        todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
+        smiles_list = todo.smiles_id.apply(get_mol_detail)
+        smiles_df_new = pd.DataFrame(smiles_list)
+        smiles_df_new = smiles_df_new.dropna(how='all')
+
+        smiles_df = pd.concat([exist_smiles, smiles_df_new])
+        smiles_df.to_hdf(file, 'smiles')
+
+        logger.info(f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
+        logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
+
+        if len(smiles_df) == 0 :
+            logger.warning(f'Can not find similes for {property_id},{property_name}')
+            break
+
+
 
 if __name__ == '__main__':
-    process_one_item(1, thread_num=3)
+    #218 CYP450_modulation
+    import fire
+    fire.Fire()
+    #process_one_item(218, thread_num=3)

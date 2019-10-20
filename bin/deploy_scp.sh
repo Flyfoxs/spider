@@ -6,9 +6,11 @@ work_dir="$(basename "$(pwd)")"
 
 ssh -t -oPort=39121 felix@c23a473940.51mypc.cn "mkdir -p $work_dir"
 
-for fold in bin core notebook;
+for fold in core bin ; #notebook bin;
 do
-  scp -r  -oPort=39121   ../$work_dir/$fold       felix@c23a473940.51mypc.cn:~/$work_dir/$fold
+  echo "~/$work_dir/$fold/*"
+  ssh -t  -oPort=39121 felix@c23a473940.51mypc.cn "rm -rf ~/$work_dir/$fold/*"
+  scp -r  -oPort=39121   ../$work_dir/$fold       felix@c23a473940.51mypc.cn:~/$work_dir/
 done
 
-scp -r  -oPort=39121   ../$work_dir/*.*        felix@c23a473940.51mypc.cn:~/$work_dir/*.*
+scp -r  -oPort=39121   ../$work_dir/*.*        felix@c23a473940.51mypc.cn:~/$work_dir/
