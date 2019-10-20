@@ -1,3 +1,4 @@
 requests
 lxml
 file_cache
+tqdm

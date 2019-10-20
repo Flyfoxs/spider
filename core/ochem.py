@@ -5,7 +5,10 @@ from lxml import html
 import numpy as np
 import os
 from functools import lru_cache
+import logging
+logging.basicConfig(level=logging.INFO)
 from file_cache.utils.util_log import timed
+from file_cache.cache import file_cache
 
 
 @lru_cache()
@@ -31,7 +34,6 @@ def get_session():
         return session
     else:
         raise Exception('login failed')
-
 
 # function to get similes and other properties
 
@@ -69,7 +71,8 @@ def get_mol_detail(smiles_id):
 
 
 @timed()
-def process_one_page(property_id, pagenum, pagesize):
+@file_cache()
+def process_one_page(pagenum, property_id, pagesize):
     total_num = get_total_cnt(property_id)
     total_page = int(np.ceil(int(total_num) / int(pagesize)))
 
@@ -125,12 +128,11 @@ def process_one_page(property_id, pagenum, pagesize):
                'abb', 'printableValue', 'property_name', 'property_id',
                'Name', 'Formula', 'InChI Key', 'Molecular Weight', 'smiles_id']
 
-    fold = f'./ochem/{property_name}'
+    fold = f'./output/ochem/{property_name}'
     fold = fold.replace(' ', '_')
-    print(fold)
-    os.makedirs(fold, exist_ok=True)
+    df_file = f'{fold}/{property_id:03}_{pagesize}_{pagenum:04}.h5'
 
-    df_file = f'{fold}/{property_id:03}_{pagenum:04}.h5'
+    os.makedirs(fold, exist_ok=True)
     df[columns].to_hdf( df_file, 'mol')
     print(f'file save to {df_file}')
 
@@ -191,12 +193,22 @@ def get_total_cnt(property_id):
 
 @timed()
 def process_one_item(property_id):
-        pagesize = 5
+        pagesize = 500
         total_num = get_total_cnt(property_id)
         total_page = int(np.ceil(int(total_num) / int(pagesize)))
 
-        for pagenum in range(1, total_page+1):
-            process_one_page(property_id, pagenum=pagenum, pagesize=pagesize)
+        # for pagenum in range(1, total_page+1):
+        #     process_one_page(property_id, pagenum=pagenum, pagesize=pagesize)
+
+        from multiprocessing import Pool as ThreadPool  # 进程
+        from multiprocessing.dummy import Pool as ThreadPool  # 线程
+        pool = ThreadPool(3)
+
+        from functools import partial
+        process_one_page_ex = partial(process_one_page,  property_id=property_id, pagesize=pagesize)
+
+        df_list = pool.map(process_one_page_ex, range(1, total_page+1), chunksize=1)
+
 
 
 
