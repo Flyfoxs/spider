@@ -9,7 +9,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 from file_cache.utils.util_log import timed
 from file_cache.cache import file_cache
-
+import time
 
 @lru_cache()
 def get_session():
@@ -73,10 +73,18 @@ def get_mol_detail(smiles_id):
 @timed()
 @file_cache()
 def process_one_page(pagenum, property_id, pagesize):
+    sleep_time = np.random.randint(1, 30)
+    time.sleep(np.random.randint(sleep_time))
+
+    args_local = locals()
     total_num = get_total_cnt(property_id)
     total_page = int(np.ceil(int(total_num) / int(pagesize)))
-
     res = get_request(property_id, pagenum, pagesize)
+
+    if res is None:
+        print(f'Get none from process_one_page:{args_local}')
+        return process_one_page(pagenum, property_id, pagesize)
+
     prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
     prop = dict(prop[0])
 
@@ -94,17 +102,21 @@ def process_one_page(pagenum, property_id, pagesize):
     item_list = res.get('list').get('exp-property')
 
     for item in tqdm(item_list, f'{property_name}:{pagenum}/{total_page}'):
-        RecordID = item.get('id')
-        printableValue = item.get('printableValue')
+        try:
+            RecordID = item.get('id')
+            printableValue = item.get('printableValue')
 
-        doi = item.get('article').get('doi')
-        abb = item.get('article').get('journal').get('abbreviation')
+            doi = item.get('article').get('doi')
+            abb = item.get('article').get('journal').get('abbreviation')
 
-        MoleculeID = item.get('molecule').get('mp2')
-        # molWeight  =     item.get('molecule').get('molWeight')
-        smiles_id = item.get('molecule').get('id')
+            MoleculeID = item.get('molecule').get('mp2')
+            # molWeight  =     item.get('molecule').get('molWeight')
+            smiles_id = item.get('molecule').get('id')
 
-        smiles_att = get_mol_detail(smiles_id)
+            smiles_att = get_mol_detail(smiles_id)
+        except Exception as e:
+            print(f'Parse error for :{RecordID}, {item}')
+            continue
 
         mol = {
             'RecordID': RecordID,
@@ -192,7 +204,7 @@ def get_total_cnt(property_id):
 
 
 @timed()
-def process_one_item(property_id):
+def process_one_item(property_id, thread_num=3):
         pagesize = 500
         total_num = get_total_cnt(property_id)
         total_page = int(np.ceil(int(total_num) / int(pagesize)))
@@ -202,7 +214,7 @@ def process_one_item(property_id):
 
         from multiprocessing import Pool as ThreadPool  # 进程
         from multiprocessing.dummy import Pool as ThreadPool  # 线程
-        pool = ThreadPool(3)
+        pool = ThreadPool(thread_num)
 
         from functools import partial
         process_one_page_ex = partial(process_one_page,  property_id=property_id, pagesize=pagesize)
@@ -214,4 +226,4 @@ def process_one_item(property_id):
 
 
 if __name__ == '__main__':
-    process_one_item(1)
+    process_one_item(1, thread_num=3)
