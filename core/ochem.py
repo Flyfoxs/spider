@@ -39,7 +39,7 @@ def get_session():
 
 
 @lru_cache()
-@timed()
+#@timed()
 def get_mol_detail(smiles_id):
     session = get_session()
     link = f'https://ochem.eu/molecule/profile.do?depiction={smiles_id}&render-mode=popup'
@@ -48,7 +48,7 @@ def get_mol_detail(smiles_id):
         response = session.get(link)
         if response.text.find('The molecule profile is unavailable') >=0 :
             logger.info(f'This is an empty molecule:{smiles_id}')
-            return {'smiles_id':smiles_id, 'SMILES':'empty'}
+            return {'smiles_id':smiles_id, 'SMILES':'unavailable'}
     except Exception as e:
         logger.warning(e)
         return get_mol_detail(smiles_id)
@@ -75,13 +75,14 @@ def get_mol_detail(smiles_id):
 
     if len(smiles_att) == 0:
         logger.info(f'Warning: can not get smiles from link: {link}')
+        return {'smiles_id': smiles_id, 'SMILES': '0'}
     else:
         smiles_att['smiles_id'] = smiles_id
-    return smiles_att
+        return smiles_att
 
 
 @timed()
-@file_cache()
+#@file_cache()
 def process_one_page(pagenum, property_id, pagesize):
     sleep_time = np.random.randint(1, 3)
     time.sleep(np.random.randint(sleep_time))
@@ -164,8 +165,10 @@ def process_one_page(pagenum, property_id, pagesize):
                'printableValue', 'property_name', 'property_id',
                'Name', 'Formula', 'InChI Key', 'Molecular Weight', 'smiles_id']
 
-    fold = f'./output/ochem/{property_name}'
+    fold = f'./output/ochem/{property_id:03}_{property_name}'
     fold = fold.replace(' ', '_')
+    fold = fold.replace('(', '_')
+    fold = fold.replace(')', '')
     df_file = f'{fold}/{property_id:03}_{pagesize}_{pagenum:04}.h5'
 
     os.makedirs(fold, exist_ok=True)
@@ -247,6 +250,8 @@ def process_one_item(property_id, thread_num=3):
 
         df_list = pool.map(process_one_page_ex, range(1, total_page+1), chunksize=1)
 
+        return pd.concat(df_list)
+
 
 
 
@@ -260,6 +265,8 @@ def fill_smiles(property_id, thread_num=3):
 
     property_name = prop['title']
     property_name = property_name.replace(' ', '_')
+    property_name = property_name.replace('(', '_')
+    property_name = property_name.replace(')', '')
 
     property_id_query = int(prop['value'])
 
@@ -267,7 +274,7 @@ def fill_smiles(property_id, thread_num=3):
         return f'{property_id} vs {property_id_query}'
 
     from glob import glob
-    reg = f'./output/ochem/{property_name}/*.h5'
+    reg = f'./output/ochem/{property_id:03}_{property_name}/*.h5'
     logger.info(f'find file with :{reg}')
     file_list = glob(reg)
     file_list = sorted(file_list)
@@ -281,7 +288,9 @@ def fill_smiles(property_id, thread_num=3):
             else:
                 exist_smiles = pd.DataFrame(columns=['smiles_id'])
         todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
-        smiles_list = todo.smiles_id.apply(get_mol_detail)
+
+        tqdm.pandas(desc=f'{property_name}:{os.path.basename(file)}')
+        smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
         smiles_df_new = pd.DataFrame(smiles_list)
         smiles_df_new = smiles_df_new.dropna(how='all')
 
