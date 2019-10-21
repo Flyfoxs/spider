@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 import logging
 logging.basicConfig(level=logging.INFO)
-from file_cache.utils.util_log import timed, logger
+from file_cache.utils.util_log import timed, logger, timed_bolck
 from file_cache.cache import file_cache
 import time
 
@@ -278,7 +278,17 @@ def fill_smiles(property_id, thread_num=3):
     logger.info(f'find file with :{reg}')
     file_list = glob(reg)
     file_list = sorted(file_list)
-    for file in tqdm(file_list, property_name):
+
+    from multiprocessing.dummy import Pool as ThreadPool  # 线程
+    pool = ThreadPool(thread_num)
+
+    df_list = pool.map(fill_similes_file, file_list, chunksize=1)
+    return pd.concat(df_list)
+
+
+def fill_similes_file(file):
+    file_name = os.path.basename(file)
+    with timed_bolck(file_name):
         df = pd.read_hdf(file, 'mol').drop_duplicates('smiles_id')
 
         with pd.HDFStore(file, 'r') as store:
@@ -289,21 +299,26 @@ def fill_smiles(property_id, thread_num=3):
                 exist_smiles = pd.DataFrame(columns=['smiles_id'])
         todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
 
-        tqdm.pandas(desc=f'{property_name}:{os.path.basename(file)}')
-        smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
-        smiles_df_new = pd.DataFrame(smiles_list)
-        smiles_df_new = smiles_df_new.dropna(how='all')
+        if len(todo) > 0:
+            tqdm.pandas(desc=file_name)
+            smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
+            smiles_df_new = pd.DataFrame(smiles_list)
+            smiles_df_new = smiles_df_new.dropna(how='all')
 
-        smiles_df = pd.concat([exist_smiles, smiles_df_new])
-        smiles_df.to_hdf(file, 'smiles')
+            smiles_df = pd.concat([exist_smiles, smiles_df_new])
+            smiles_df.to_hdf(file, 'smiles')
 
-        logger.info(f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
-        logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
+            logger.info(
+                f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
+            logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
 
-        if len(smiles_df) == 0 :
-            logger.warning(f'Can not find similes for {property_id},{property_name}')
-            break
+            if len(smiles_df) == 0:
+                logger.warning(f'Can not find similes for file:{file}')
+        else:
+            logger.warning(f'No similes need to pull for file:{file}')
+            smiles_df = exist_smiles
 
+        return smiles_df
 
 
 if __name__ == '__main__':

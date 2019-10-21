@@ -3,6 +3,7 @@
     ./bin/main.sh property_id
     
 运行实例:
+    
     nohup ./bin/main.sh 1  & 
     
     nohup ./bin/main.sh 2  & 
