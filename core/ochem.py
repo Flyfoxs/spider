@@ -82,7 +82,7 @@ def get_mol_detail(smiles_id):
 
 
 @timed()
-#@file_cache()
+@file_cache()
 def process_one_page(pagenum, property_id, pagesize):
     sleep_time = np.random.randint(1, 3)
     time.sleep(np.random.randint(sleep_time))
@@ -241,7 +241,7 @@ def process_one_item(property_id, thread_num=3):
         # for pagenum in range(1, total_page+1):
         #     process_one_page(property_id, pagenum=pagenum, pagesize=pagesize)
 
-        from multiprocessing import Pool as ThreadPool  # 进程
+        #from multiprocessing import Pool as ThreadPool  # 进程
         from multiprocessing.dummy import Pool as ThreadPool  # 线程
         pool = ThreadPool(thread_num)
 

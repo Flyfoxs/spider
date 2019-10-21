@@ -13,4 +13,4 @@ do
   scp -r  -oPort=39121   ../$work_dir/$fold       felix@c23a473940.51mypc.cn:~/$work_dir/
 done
 
-scp -r  -oPort=39121   ../$work_dir/*.*        felix@c23a473940.51mypc.cn:~/$work_dir/
+scp -r  -oPort=39121   ../$work_dir/requirements.*        felix@c23a473940.51mypc.cn:~/$work_dir/
