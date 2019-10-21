@@ -4,7 +4,9 @@
     
 运行实例:
     nohup ./bin/main.sh 1  & 
+    
     nohup ./bin/main.sh 2  & 
+    
     nohup ./bin/main.sh 3  & 
     
     
