@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.INFO)
 from file_cache.utils.util_log import timed, logger, timed_bolck
 from file_cache.cache import file_cache
 import time
+from glob import glob
 
 @lru_cache()
 def get_session():
@@ -273,7 +274,7 @@ def fill_smiles(property_id, thread_num=3):
     if property_id != property_id_query :
         return f'{property_id} vs {property_id_query}'
 
-    from glob import glob
+
     reg = f'./output/ochem/{property_id:03}_{property_name}/*.h5'
     logger.info(f'find file with :{reg}')
     file_list = glob(reg)
@@ -319,6 +320,22 @@ def fill_similes_file(file):
             smiles_df = exist_smiles
 
         return smiles_df
+
+
+@timed()
+@file_cache(type='h5')
+def get_feature(fold='./output/ochem/156_Plasma_protein_binding'):
+    file_list = sorted(list(glob(f'{fold}/*.h5')))
+
+    mol_list = []
+    for file in tqdm(file_list, fold):
+        mol = pd.read_hdf(file, 'mol')
+        smiles = pd.read_hdf(file, 'smiles')
+
+        mol = mol.merge(smiles, how='left', on='smiles_id')
+        mol_list.append(mol)
+
+    return pd.concat(mol_list)
 
 
 if __name__ == '__main__':
