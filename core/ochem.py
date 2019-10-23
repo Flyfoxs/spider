@@ -90,7 +90,7 @@ def process_one_page(pagenum, property_id, pagesize):
     args_local = locals()
     total_num, property_name = get_total_cnt(property_id)
     total_page = int(np.ceil(int(total_num) / int(pagesize)))
-    res = get_request(property_id, pagenum, pagesize)
+
 
     fold = f'./output/ochem/{property_id:03}_{property_name}'
     fold = fold.replace(' ', '_')
@@ -109,6 +109,8 @@ def process_one_page(pagenum, property_id, pagesize):
             logger.info(f'Don not find printableValue_ex for {property_name}/{property_id} df:{exist_df.shape}')
             return exist_df
         logger.warning(f'Rerun the batch process for {property_name}/{property_id} df:{exist_df.shape}')
+
+    res = get_request(property_id, pagenum, pagesize)
 
     if res.get('filters') is None or res.get('filters').get('filter') is None:
         if res is None:
