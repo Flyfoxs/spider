@@ -1,4 +1,7 @@
 可以支持分布式运行和断电续传:
+
+https://ochem.eu/home/show.do
+
 运行方式如下:
     ./bin/main.sh property_id
     
@@ -25,4 +28,4 @@ Import List:
     377, Ki CYP450
     221, CYP450 reaction
     114, Oral absorption
-    46, Water solubility
+    46 , Water solubility

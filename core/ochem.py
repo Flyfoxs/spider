@@ -83,32 +83,46 @@ def get_mol_detail(smiles_id):
 
 
 @timed()
-@file_cache()
 def process_one_page(pagenum, property_id, pagesize):
     sleep_time = np.random.randint(1, 3)
     time.sleep(np.random.randint(sleep_time))
 
     args_local = locals()
-    total_num = get_total_cnt(property_id)
+    total_num, property_name = get_total_cnt(property_id)
     total_page = int(np.ceil(int(total_num) / int(pagesize)))
     res = get_request(property_id, pagenum, pagesize)
+
+    fold = f'./output/ochem/{property_id:03}_{property_name}'
+    fold = fold.replace(' ', '_')
+    fold = fold.replace('(', '_')
+    fold = fold.replace(')', '')
+    os.makedirs(fold, exist_ok=True)
+    df_file = f'{fold}/{property_id:03}_{pagesize}_{pagenum:04}.h5'
+
+    if os.path.exists(df_file):
+        exist_df = pd.read_hdf(df_file, 'mol')
+        columns_cnt_base = 7
+        if len( exist_df.columns) > columns_cnt_base:
+            logger.info(f'Already have df:{exist_df.shape} with col printableValue_ex  {property_name}/{property_id}')
+            return exist_df
+        if len(exist_df.columns) == columns_cnt_base and not has_printvalue_ex(property_id):
+            logger.info(f'Don not find printableValue_ex for {property_name}/{property_id} df:{exist_df.shape}')
+            return exist_df
+        logger.warning(f'Rerun the batch process for {property_name}/{property_id} df:{exist_df.shape}')
 
     if res.get('filters') is None or res.get('filters').get('filter') is None:
         if res is None:
             source = 1
         elif res.get('filters') is None:
+            print(res)
             source = 2
         elif res.get('filters').get('filter') is None:
             source = 3
         logger.info(f'Error: Get none from process_one_page({source}):{args_local}')
         return process_one_page(pagenum, property_id, pagesize)
 
-    prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
 
-    prop = dict(prop[0])
-
-    property_name = prop['title']
-    property_id = int(prop['value'])
+    #property_id = int(prop['value'])
 
     list_len = len(res.get('list').get('exp-property'))
 
@@ -137,24 +151,41 @@ def process_one_page(pagenum, property_id, pagesize):
             step = 6
             #smiles_att = get_mol_detail(smiles_id)
             step = 7
+
+            right_att = {}
+            if 'conditions' in item and 'property-value' in item.get('conditions'):
+                prpperty_value = item.get('conditions').get('property-value')
+                if isinstance(prpperty_value, list):
+                    for one_property in prpperty_value :
+                        key = one_property.get('property').get('name')
+                        val = one_property.get('printableValue')
+                        right_att[key] = val
+                else:
+                    key = prpperty_value.get('property').get('name')
+                    val = prpperty_value.get('printableValue')
+                    right_att[key] = val
+
+
         except Exception as e:
-            logger.error(e)
-            logger.error(f'Parse error for :{RecordID}, step:{step}')
+            logger.exception(e)
+            logger.error(f'Parse error for :{RecordID}, step:{step}, {(pagenum, property_id, pagesize)}')
             logger.error(item)
-            return
+            return e
 
         mol = {
             'RecordID': RecordID,
             'printableValue': printableValue,
             'doi': doi,
             #'abb': abb,
-            'MoleculeID': MoleculeID,
+            'MoleculeID' : MoleculeID,
             # 'molWeight':molWeight,
-            'smiles_id': smiles_id,
-            'property_name': property_name,
-            'property_id':property_id,
+            'smiles_id' : smiles_id,
+            'property_name' : property_name,
+            'property_id' : property_id,
+            #'printableValue_ex' : printableValue_ex,
 
         }
+        mol.update(right_att)
 
         #mol.update(smiles_att)
         mol_list.append(mol)
@@ -166,13 +197,11 @@ def process_one_page(pagenum, property_id, pagesize):
                'printableValue', 'property_name', 'property_id',
                'Name', 'Formula', 'InChI Key', 'Molecular Weight', 'smiles_id']
 
-    fold = f'./output/ochem/{property_id:03}_{property_name}'
-    fold = fold.replace(' ', '_')
-    fold = fold.replace('(', '_')
-    fold = fold.replace(')', '')
-    df_file = f'{fold}/{property_id:03}_{pagesize}_{pagenum:04}.h5'
+    for key in mol.keys():
+        if key not in columns:
+            columns.append(key)
 
-    os.makedirs(fold, exist_ok=True)
+
 
     columns = [col for col in columns if col in df]
     df[columns].to_hdf( df_file, 'mol')
@@ -182,6 +211,7 @@ def process_one_page(pagenum, property_id, pagesize):
 
 
 @timed()
+@lru_cache()
 def get_request(property_id, pagenum, pagesize = 500):
     url = 'https://ochem.eu/epbrowser/list.do'
     headers1 = {
@@ -228,15 +258,26 @@ def get_request(property_id, pagenum, pagesize = 500):
 
 @lru_cache()
 def get_total_cnt(property_id):
-    res = get_request(property_id, 1, pagesize=5)
+    res = get_request(property_id, 5, pagesize=5)
     total_num = res.get('list').get('size')
-    return total_num
 
+    prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
+
+    prop = dict(prop[0])
+
+    property_name = prop['title']
+    return total_num, property_name
+
+@lru_cache()
+def has_printvalue_ex(property_id):
+    res = get_request(property_id, 5, pagesize=5)
+    item_list = res.get('list').get('exp-property')
+    return 'property-value' in item_list[0].get('conditions')
 
 @timed()
 def process_one_item(property_id, thread_num=3):
         pagesize = 500
-        total_num = get_total_cnt(property_id)
+        total_num, property_name = get_total_cnt(property_id)
         total_page = int(np.ceil(int(total_num) / int(pagesize)))
 
         # for pagenum in range(1, total_page+1):
@@ -289,37 +330,42 @@ def fill_smiles(property_id, thread_num=3):
 
 def fill_similes_file(file):
     file_name = os.path.basename(file)
-    with timed_bolck(file_name):
-        df = pd.read_hdf(file, 'mol').drop_duplicates('smiles_id')
+    try:
+        with timed_bolck(file_name):
+            df = pd.read_hdf(file, 'mol').drop_duplicates('smiles_id')
 
-        with pd.HDFStore(file, 'r') as store:
-            meta_data = store.keys()
-            if '/smiles' in meta_data:
-                exist_smiles = pd.read_hdf(file, 'smiles')
+            with pd.HDFStore(file, 'r') as store:
+                meta_data = store.keys()
+                if '/smiles' in meta_data:
+                    exist_smiles = pd.read_hdf(file, 'smiles')
+                else:
+                    exist_smiles = pd.DataFrame(columns=['smiles_id'])
+            todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
+
+            if len(todo) > 0:
+                tqdm.pandas(desc=file_name)
+                smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
+                smiles_df_new = pd.DataFrame(smiles_list)
+                smiles_df_new = smiles_df_new.dropna(how='all')
+
+                smiles_df = pd.concat([exist_smiles, smiles_df_new])
+                smiles_df.to_hdf(file, 'smiles')
+
+                logger.info(
+                    f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
+                logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
+
+                if len(smiles_df) == 0:
+                    logger.warning(f'Can not find similes for file:{file}')
             else:
-                exist_smiles = pd.DataFrame(columns=['smiles_id'])
-        todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
+                logger.warning(f'No similes need to pull for file:{file}')
+                smiles_df = exist_smiles
 
-        if len(todo) > 0:
-            tqdm.pandas(desc=file_name)
-            smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
-            smiles_df_new = pd.DataFrame(smiles_list)
-            smiles_df_new = smiles_df_new.dropna(how='all')
-
-            smiles_df = pd.concat([exist_smiles, smiles_df_new])
-            smiles_df.to_hdf(file, 'smiles')
-
-            logger.info(
-                f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
-            logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
-
-            if len(smiles_df) == 0:
-                logger.warning(f'Can not find similes for file:{file}')
-        else:
-            logger.warning(f'No similes need to pull for file:{file}')
-            smiles_df = exist_smiles
-
-        return smiles_df
+            return smiles_df
+    except Exception as e:
+        logger.error(f'There is error when process:{file}')
+        logger.exception(e)
+        return pd.DataFrame()
 
 
 @timed()
