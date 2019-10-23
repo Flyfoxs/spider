@@ -1,3 +1,5 @@
+from json import JSONDecodeError
+
 import requests
 from tqdm import tqdm
 import pandas as pd
@@ -254,7 +256,13 @@ def get_request(property_id, pagenum, pagesize = 500):
     # get the request info:
     # List size, and list property_name, property_id
     import json
-    res = json.loads(r.text.encode('utf-8'))
+    try:
+        res = json.loads(r.text.encode('utf-8'))
+    except JSONDecodeError as e:
+        logger.exception(e)
+        logger.info(f'Error for paras:{property_id, pagenum, pagesize}')
+        logger.info(res[:100])
+        raise e
 
     return res
 
