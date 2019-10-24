@@ -117,6 +117,10 @@ def process_one_page(pagenum, property_id, pagesize):
     if res.get('filters') is None or res.get('filters').get('filter') is None:
         if res is None:
             source = 1
+        elif 'message' in res  \
+                and  'message' in res.get('message') \
+                and 'You are not logged in' in res.get('message').get('message'):
+            raise Exception('Session is timeout')
         elif res.get('filters') is None:
             print(res)
             source = 2
