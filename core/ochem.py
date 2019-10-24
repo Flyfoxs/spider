@@ -378,6 +378,16 @@ def fill_similes_file(file):
         return pd.DataFrame()
 
 
+def get_smiles_all():
+    df_list = []
+    for file in glob('./output/ochem/*/*.h5') :
+        try:
+            smiles = pd.read_hdf(file, 'smiles')
+            df_list.append(smiles)
+        except Exception as e :
+            logger.warning(f'No smiles df in file:{file}')
+    return pd.concat(df_list)
+
 @timed()
 @file_cache(type='h5')
 def get_feature(fold='./output/ochem/156_Plasma_protein_binding'):
@@ -392,6 +402,18 @@ def get_feature(fold='./output/ochem/156_Plasma_protein_binding'):
         mol_list.append(mol)
 
     return pd.concat(mol_list)
+
+def get_feature_final():
+    from glob import glob
+    os.makedirs('./final/', exist_ok=True)
+    for fold in list(glob('./output/*/*')):
+        try:
+            df = get_feature(fold)
+            file = f'final/{os.path.basename(fold)}_{df.shape[0]}_{df.shape[1]}.h5'
+            df.to_hdf(file, 'key')
+            print(file, df.shape)
+        except Exception as e:
+            print(f'Error:{fold} ')
 
 
 if __name__ == '__main__':
