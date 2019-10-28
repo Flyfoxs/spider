@@ -6,11 +6,12 @@ mkdir -p log
 
 #python -u core/ochem.py
 thread_num=3
-for property_id in 46  114  221  377  375  218  697  156  114  206 ;
+for xx in {0..3}:
 do
-
-  bin/main.sh $property_id
-
+  for property_id in {0..100};
+  do
+    bin/main.sh $property_id
+  done
 done
 
 

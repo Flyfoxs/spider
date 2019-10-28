@@ -7,6 +7,10 @@ mkdir -p log
 #python -u core/ochem.py
 thread_num=3
 #python -u core/ochem.py  process_one_item $1 $thread_num > log/p_$1.log 2>&1
+
+rm -rf  cache/get_smiles_all==.pickle
+python -u core/ochem.py  get_smiles_all
+
 python -u core/ochem.py  process_one_item $1 1 > log/p_$1.log 2>&1
 python -u core/ochem.py  fill_smiles   $1   $((thread_num*2)) > log/s_$1.log 2>&1
 

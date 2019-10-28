@@ -103,14 +103,16 @@ def process_one_page(pagenum, property_id, pagesize):
 
     if os.path.exists(df_file):
         exist_df = pd.read_hdf(df_file, 'mol')
-        columns_cnt_base = 7
-        if len( exist_df.columns) > columns_cnt_base:
-            logger.info(f'Already have df:{exist_df.shape} with col printableValue_ex  {property_name}/{property_id}')
-            return exist_df
-        if len(exist_df.columns) == columns_cnt_base and not has_printvalue_ex(property_id):
-            logger.info(f'Don not find printableValue_ex for {property_name}/{property_id} df:{exist_df.shape}')
-            return exist_df
-        logger.warning(f'Rerun the batch process for {property_name}/{property_id} df:{exist_df.shape}')
+        logger.info(f'Already have df:{exist_df.shape} in file:{df_file}')
+        return exist_df
+        # columns_cnt_base = 7
+        # if len( exist_df.columns) > columns_cnt_base:
+        #     logger.info(f'Already have df:{exist_df.shape} with col printableValue_ex  {property_name}/{property_id}')
+        #     return exist_df
+        # if len(exist_df.columns) == columns_cnt_base and not has_printvalue_ex(property_id):
+        #     logger.info(f'Don not find printableValue_ex for {property_name}/{property_id} df:{exist_df.shape}')
+        #     return exist_df
+        # logger.warning(f'Rerun the batch process for {property_name}/{property_id} df:{exist_df.shape}, columns_cnt_base{columns_cnt_base}')
 
     res = get_request(property_id, pagenum, pagesize)
 
@@ -272,7 +274,7 @@ def get_request(property_id, pagenum, pagesize = 500):
 
 @lru_cache()
 def get_total_cnt(property_id):
-    res = get_request(property_id, 5, pagesize=5)
+    res = get_request(property_id, 1, pagesize=5)
     total_num = res.get('list').get('size')
 
     prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
@@ -284,13 +286,13 @@ def get_total_cnt(property_id):
 
 @lru_cache()
 def has_printvalue_ex(property_id):
-    res = get_request(property_id, 5, pagesize=5)
+    res = get_request(property_id, 1, pagesize=5)
     item_list = res.get('list').get('exp-property')
     return 'property-value' in item_list[0].get('conditions')
 
 @timed()
 def process_one_item(property_id, thread_num=3):
-        pagesize = 500
+        pagesize = 50
         total_num, property_name = get_total_cnt(property_id)
         total_page = int(np.ceil(int(total_num) / int(pagesize)))
 
@@ -311,9 +313,9 @@ def process_one_item(property_id, thread_num=3):
 
 
 
-@timed()
+#@timed()
 def fill_smiles(property_id, thread_num=3):
-    res = get_request(property_id, 1, 1)
+    res = get_request(property_id, 1, 5)
 
     prop = [item for item in res.get('filters').get('filter') if item.get('name') == 'property']
 
@@ -331,66 +333,96 @@ def fill_smiles(property_id, thread_num=3):
 
 
     reg = f'./output/ochem/{property_id:03}_{property_name}/*.h5'
-    logger.info(f'find file with :{reg}')
-    file_list = glob(reg)
-    file_list = sorted(file_list)
 
+    file_list = glob(reg)
+    file_list = sorted(set(file_list))
+
+    logger.info(f'find {len(file_list)} file with :{reg}')
     from multiprocessing.dummy import Pool as ThreadPool  # 线程
     pool = ThreadPool(thread_num)
 
-    df_list = pool.map(fill_similes_file, file_list, chunksize=1)
+    df_list = pool.map(fill_smiles_file, file_list, chunksize=1)
     return pd.concat(df_list)
 
 
-def fill_similes_file(file):
+@timed()
+def fill_smiles_file(file):
     file_name = os.path.basename(file)
     try:
-        with timed_bolck(file_name):
+        try:
+            print(1)
             df = pd.read_hdf(file, 'mol').drop_duplicates('smiles_id')
-
-            with pd.HDFStore(file, 'r') as store:
-                meta_data = store.keys()
-                if '/smiles' in meta_data:
+            logger.warning(f'No smiles in file:{file_name}')
+            print(2)
+            with pd.HDFStore(file, mode='r') as store:
+                keys = store.keys()
+                if '/smiles' in keys:
                     exist_smiles = pd.read_hdf(file, 'smiles')
                 else:
                     exist_smiles = pd.DataFrame(columns=['smiles_id'])
-            todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
+        except Exception as e :
+            logger.exception(e)
+        all_smiles = get_smiles_all()
+        exist_smiles = pd.concat([exist_smiles, all_smiles])
 
-            if len(todo) > 0:
-                tqdm.pandas(desc=file_name)
-                smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
-                smiles_df_new = pd.DataFrame(smiles_list)
-                smiles_df_new = smiles_df_new.dropna(how='all')
+        exist_smiles = exist_smiles.loc[exist_smiles.SMILES.fillna('').str.len() > 1]
 
-                smiles_df = pd.concat([exist_smiles, smiles_df_new])
-                smiles_df.to_hdf(file, 'smiles')
+        todo = df.loc[~df.smiles_id.isin(exist_smiles.smiles_id)]
 
-                logger.info(
-                    f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
-                logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
+        if len(todo) > 0:
+            tqdm.pandas(desc=file_name)
+            smiles_list = todo.smiles_id.progress_apply(get_mol_detail).to_list()
+            smiles_df_new = pd.DataFrame(smiles_list)
+            smiles_df_new = smiles_df_new.dropna(how='all')
 
-                if len(smiles_df) == 0:
-                    logger.warning(f'Can not find similes for file:{file}')
-            else:
-                logger.warning(f'No similes need to pull for file:{file}')
-                smiles_df = exist_smiles
+            smiles_df = pd.concat([exist_smiles, smiles_df_new])
 
-            return smiles_df
+            #Pick up simles for current DF
+            smiles_df = smiles_df.loc[smiles_df.smiles_id.astype(str).isin(df.smiles_id.astype(str))]
+
+            smiles_df.to_hdf(file, 'smiles')
+
+            logger.info(f'Find {len(todo)} smiles from {len(smiles_df_new)} todo, exist smiles:{len(exist_smiles)}, total mol:{len(df)}')
+            logger.info(f'Current status:{len(smiles_df)}/{len(df)}, {file}')
+
+
+            if len(smiles_df) == 0:
+                logger.warning(f'Can not find similes for file:{file}')
+        else:
+            print('='*100)
+            logger.info((type(df), type(exist_smiles)))
+            logger.info((df.dtypes, exist_smiles.dtypes))
+            print(type(exist_smiles.smiles_id), type(exist_smiles['smiles_id']), exist_smiles.head().smiles_id, df.smiles_id.to_list())
+            smiles_df = exist_smiles.loc[exist_smiles['smiles_id'].astype(str).isin(df['smiles_id'].astype(str))]
+            logger.warning(f'No similes need to pull for file:{file}, todo:{len(todo)}, cur_similes:{len(smiles_df)}, all_smiles:{len(all_smiles)},exist_smiles:{len(exist_smiles)}')
+            #Pick up simles for current DF
+        return smiles_df
     except Exception as e:
-        logger.error(f'There is error when process:{file}')
         logger.exception(e)
+        logger.error(f'There is error when process:{file}')
         return pd.DataFrame()
 
-
+@timed()
+@file_cache()
 def get_smiles_all():
     df_list = []
-    for file in glob('./output/ochem/*/*.h5') :
+    df_list.append(pd.DataFrame())
+
+    file_list = list(glob('./output/ochem/*/*.h5'))
+    for file in file_list:
         try:
             smiles = pd.read_hdf(file, 'smiles')
             df_list.append(smiles)
+            #logger.info(f'Find {len(smiles)} smiles in file:{file}')
         except Exception as e :
-            logger.warning(f'No smiles df in file:{file}')
-    return pd.concat(df_list)
+            #logger.exception(e)
+            #logger.warning(f'No smiles df in file:{file}')
+            pass
+    df = pd.concat(df_list)
+
+    df = df.loc[df.SMILES.fillna('').str.len()>1]
+    print(df.shape, df.dtypes, type(df.smiles_id), df.head().smiles_id)
+    return df.drop_duplicates(['smiles_id'])
 
 @timed()
 @file_cache(type='h5')
@@ -400,12 +432,11 @@ def get_feature(fold='./output/ochem/156_Plasma_protein_binding'):
     mol_list = []
     for file in tqdm(file_list, fold):
         mol = pd.read_hdf(file, 'mol')
-        smiles = pd.read_hdf(file, 'smiles')
+        smiles = get_smiles_all()
 
         mol = mol.merge(smiles, how='left', on='smiles_id')
         mol_list.append(mol)
-
-    return pd.concat(mol_list)
+    return pd.concat(mol_list).df.drop_duplicates()
 
 def get_feature_final():
     from glob import glob
@@ -424,4 +455,7 @@ if __name__ == '__main__':
     #218 CYP450_modulation
     import fire
     fire.Fire()
+    #fill_smiles_file('./output/ochem/004_LogL_water/004_50_0001.h5')
     #process_one_item(218, thread_num=3)
+
+    #get_smiles_all()
