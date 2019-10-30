@@ -8,7 +8,7 @@ mkdir -p log
 thread_num=3
 for xx in {0..3}:
 do
-  for property_id in {0..100};
+  for property_id in {1..5};
   do
     bin/main.sh $property_id
   done
